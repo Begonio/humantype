@@ -13,6 +13,11 @@ const PORT = process.env.PORT ?? 3001
 const CLIENT_URL = process.env.CLIENT_URL ?? 'http://localhost:5173'
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
 
+// Trust Railway's proxy so secure cookies work correctly behind HTTPS termination
+if (IS_PRODUCTION) {
+  app.set('trust proxy', 1)
+}
+
 // Configure passport Google strategy
 configurePassport()
 
@@ -33,8 +38,8 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: IS_PRODUCTION,  // HTTPS in production
-    sameSite: IS_PRODUCTION ? 'lax' : false,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'none' : false, // 'none' works across Railway's proxy redirects
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
   },
 }))
