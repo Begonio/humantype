@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express'
-import { createOAuth2Client } from '../google/auth'
+import { createOAuth2Client, type PassportUser } from '../google/auth'
 import {
   createDocsClient,
   createDocument,
@@ -55,8 +55,8 @@ function countParagraphBreaks(events: KeystrokeEvent[]): number {
 
 // POST /api/write — start writing with SSE stream
 router.post('/write', async (req: Request, res: Response) => {
-  const session = req.session as { tokens?: GoogleTokens }
-  if (!session.tokens) {
+  const user = req.user as PassportUser | undefined
+  if (!req.isAuthenticated() || !user?.accessToken) {
     res.status(401).json({ error: 'Not authenticated' })
     return
   }
@@ -83,14 +83,16 @@ router.post('/write', async (req: Request, res: Response) => {
   res.setHeader('X-Accel-Buffering', 'no')
   res.flushHeaders()
 
-  const auth = createOAuth2Client(session.tokens)
+  const tokens: GoogleTokens = {
+    access_token: user.accessToken,
+    refresh_token: user.refreshToken,
+  }
+  const auth = createOAuth2Client(tokens)
 
-  // Refresh tokens handler — persist back to session
+  // Refresh tokens handler
   auth.on('tokens', (newTokens) => {
-    if (newTokens.refresh_token) {
-      session.tokens = { ...session.tokens, ...newTokens }
-    } else {
-      session.tokens = { ...session.tokens, access_token: newTokens.access_token }
+    if (newTokens.access_token) {
+      (req.user as PassportUser).accessToken = newTokens.access_token
     }
   })
 

@@ -11,6 +11,12 @@ const SCOPES = [
   'email',
 ]
 
+export interface PassportUser {
+  id: string
+  accessToken: string
+  refreshToken: string | null
+}
+
 export function configurePassport(): void {
   passport.use(
     new GoogleStrategy(
@@ -18,29 +24,28 @@ export function configurePassport(): void {
         clientID: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
         callbackURL: `${process.env.SERVER_URL ?? 'http://localhost:3001'}/api/auth/google/callback`,
-        passReqToCallback: true,
       },
-      (req: Request, accessToken: string, refreshToken: string, profile, done) => {
-        const tokens: GoogleTokens = {
-          access_token: accessToken,
-          refresh_token: refreshToken,
+      (_accessToken: string, _refreshToken: string, profile, done) => {
+        // Store tokens on the user object so Passport serializes them into the session
+        // (Setting them directly on req.session here would lose them on session regeneration)
+        const user: PassportUser = {
+          id: profile.id,
+          accessToken: _accessToken,
+          refreshToken: _refreshToken ?? null,
         }
-        // Store tokens in session
-        if (req.session) {
-          req.session.tokens = tokens
-          req.session.userId = profile.id
-        }
-        done(null, profile)
+        done(null, user)
       }
     )
   )
 
+  // Serialize the full user+tokens into the session
   passport.serializeUser((user, done) => {
-    done(null, (user as { id: string }).id)
+    done(null, user)
   })
 
-  passport.deserializeUser((id, done) => {
-    done(null, { id })
+  // Deserialize restores the full user+tokens from the session
+  passport.deserializeUser((user, done) => {
+    done(null, user as PassportUser)
   })
 }
 
