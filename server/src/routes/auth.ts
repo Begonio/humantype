@@ -28,8 +28,21 @@ router.get(
 
 // Check auth status
 router.get('/status', (req, res) => {
-  const hasTokens = !!(req.session as { tokens?: unknown }).tokens
+  const session = req.session as { tokens?: unknown }
+  const hasTokens = !!session.tokens
+  console.log('[auth/status] session id:', req.sessionID, '| hasTokens:', hasTokens, '| cookies:', req.headers.cookie ? 'present' : 'missing')
   res.json({ authenticated: hasTokens })
+})
+
+// Debug endpoint — temporary
+router.get('/debug', (req, res) => {
+  const session = req.session as { tokens?: unknown; userId?: string }
+  res.json({
+    sessionID: req.sessionID,
+    hasTokens: !!session.tokens,
+    userId: session.userId ?? null,
+    cookieHeader: req.headers.cookie ?? null,
+  })
 })
 
 // Sign out
