@@ -19,7 +19,10 @@ router.get(
   '/google/callback',
   passport.authenticate('google', { failureRedirect: `${process.env.CLIENT_URL}?error=auth_failed` }),
   (req, res) => {
-    res.redirect(`${process.env.CLIENT_URL}?authed=1`)
+    // Explicitly save session before redirecting so the cookie is set in time
+    req.session.save(() => {
+      res.redirect(`${process.env.CLIENT_URL}?authed=1`)
+    })
   }
 )
 
