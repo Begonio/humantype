@@ -1,28 +1,33 @@
-import type { Response } from 'express'
-
 export type KeystrokeEvent =
   | { type: 'insert'; char: string; delay: number }
   | { type: 'backspace'; delay: number }
   | { type: 'pause'; duration: number }
 
+export type SpeedPreset = 'slow' | 'normal' | 'fast' | 'turbo'
+
+export type JobStatus = 'running' | 'paused' | 'stopped' | 'done' | 'error'
+
 export interface WriteJob {
   sessionId: string
-  status: 'running' | 'paused' | 'stopped'
-  res: Response
+  status: JobStatus
   docId: string
-  cursorIndex: number
+  docUrl: string
   charsWritten: number
   totalChars: number
-  startTime: number
-  paragraphIndex: number
   totalParagraphs: number
+  paragraphIndex: number
+  startTime: number
+  cpm: number
+  cursorIndex: number
+  error?: string
 }
 
 export interface WriteRequestBody {
   sessionId: string
-  events: KeystrokeEvent[]
+  text: string
+  speed: SpeedPreset
+  humanness: number
   docId?: string
-  totalParagraphs?: number
 }
 
 export interface GoogleTokens {

@@ -5,15 +5,9 @@ import { Preview } from './components/Preview'
 import { StatusBar } from './components/StatusBar'
 import { ProgressBar } from './components/ProgressBar'
 import { ActionButtons } from './components/ActionButtons'
-import { generateKeystrokes, countParagraphs, getSpeedMultiplier } from './lib/humanize'
-import { startWriteSession, sendControl, checkAuthStatus } from './lib/sse'
-import type {
-  AppStatus,
-  KeystrokeEvent,
-  ProgressState,
-  SpeedPreset,
-  SSEEvent,
-} from './types'
+import { generateKeystrokes, getSpeedMultiplier } from './lib/humanize'
+import { startWriteJob, pollStatus, sendControl, checkAuthStatus } from './lib/api'
+import type { AppStatus, KeystrokeEvent, ProgressState, SpeedPreset } from './types'
 
 interface AppState {
   status: AppStatus
@@ -36,9 +30,11 @@ type AppAction =
   | { type: 'SET_DOC_ID'; docId: string }
   | { type: 'SET_AUTH'; isAuthenticated: boolean }
   | { type: 'START'; sessionId: string; events: KeystrokeEvent[] }
-  | { type: 'SSE_EVENT'; event: SSEEvent }
+  | { type: 'SET_DOC_URL'; docUrl: string }
+  | { type: 'SET_PROGRESS'; progress: ProgressState }
   | { type: 'PAUSE' }
   | { type: 'RESUME' }
+  | { type: 'DONE'; docUrl: string }
   | { type: 'STOP' }
   | { type: 'RESET' }
   | { type: 'ERROR'; message: string }
@@ -81,44 +77,16 @@ function reducer(state: AppState, action: AppAction): AppState {
         docUrl: null,
         error: null,
       }
-    case 'SSE_EVENT': {
-      const e = action.event
-      if (e.type === 'start') {
-        return { ...state, docUrl: e.docUrl }
-      }
-      if (e.type === 'progress') {
-        return {
-          ...state,
-          progress: {
-            chars: e.chars,
-            total: e.total,
-            cpm: e.cpm,
-            paragraph: e.paragraph,
-            totalParagraphs: e.totalParagraphs,
-          },
-        }
-      }
-      if (e.type === 'done') {
-        return { ...state, status: 'done', docUrl: e.docUrl }
-      }
-      if (e.type === 'paused') {
-        return { ...state, status: 'paused' }
-      }
-      if (e.type === 'resumed') {
-        return { ...state, status: 'writing' }
-      }
-      if (e.type === 'stopped') {
-        return { ...state, status: 'idle' }
-      }
-      if (e.type === 'error') {
-        return { ...state, status: 'error', error: e.message }
-      }
-      return state
-    }
+    case 'SET_DOC_URL':
+      return { ...state, docUrl: action.docUrl }
+    case 'SET_PROGRESS':
+      return { ...state, progress: action.progress }
     case 'PAUSE':
       return { ...state, status: 'paused' }
     case 'RESUME':
       return { ...state, status: 'writing' }
+    case 'DONE':
+      return { ...state, status: 'done', docUrl: action.docUrl }
     case 'STOP':
       return { ...state, status: 'idle' }
     case 'RESET':
@@ -132,18 +100,61 @@ function reducer(state: AppState, action: AppAction): AppState {
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, undefined, initialState)
-  const sseRef = useRef<{ abort: () => void } | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Check auth on mount and after OAuth redirect
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }
+
+  function startPolling(sessionId: string) {
+    stopPolling()
+    pollRef.current = setInterval(async () => {
+      try {
+        const job = await pollStatus(sessionId)
+        dispatch({
+          type: 'SET_PROGRESS',
+          progress: {
+            chars: job.charsWritten,
+            total: job.totalChars,
+            cpm: job.cpm,
+            paragraph: job.paragraphIndex,
+            totalParagraphs: job.totalParagraphs,
+          },
+        })
+        if (job.docUrl) dispatch({ type: 'SET_DOC_URL', docUrl: job.docUrl })
+
+        if (job.status === 'done') {
+          stopPolling()
+          dispatch({ type: 'DONE', docUrl: job.docUrl })
+        } else if (job.status === 'error') {
+          stopPolling()
+          dispatch({ type: 'ERROR', message: job.error ?? 'Unknown error' })
+        } else if (job.status === 'stopped') {
+          stopPolling()
+          dispatch({ type: 'STOP' })
+        } else if (job.status === 'paused') {
+          dispatch({ type: 'PAUSE' })
+        } else if (job.status === 'running') {
+          dispatch({ type: 'RESUME' })
+        }
+      } catch {
+        // Server unreachable — keep polling silently
+      }
+    }, 2000)
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.has('authed') || params.has('error')) {
       window.history.replaceState({}, '', window.location.pathname)
     }
-
     checkAuthStatus().then(authenticated => {
       dispatch({ type: 'SET_AUTH', isAuthenticated: authenticated })
     })
+    return stopPolling
   }, [])
 
   function handleSignIn() {
@@ -152,35 +163,24 @@ export default function App() {
 
   async function handleStart() {
     if (!state.text.trim()) return
-
     const sessionId = crypto.randomUUID()
-    const speedMultiplier = getSpeedMultiplier(state.speed)
-    const events = generateKeystrokes(state.text, speedMultiplier, state.humanness)
-    const totalParagraphs = countParagraphs(state.text)
-
+    // Generate events client-side only for the live preview animation
+    const events = generateKeystrokes(state.text, getSpeedMultiplier(state.speed), state.humanness)
     dispatch({ type: 'START', sessionId, events })
 
-    const sse = startWriteSession(
-      {
+    try {
+      const result = await startWriteJob({
         sessionId,
-        events,
+        text: state.text,
+        speed: state.speed,
+        humanness: state.humanness,
         docId: state.docId.trim() || undefined,
-        totalParagraphs,
-      },
-      (event: SSEEvent) => {
-        dispatch({ type: 'SSE_EVENT', event })
-      },
-      () => {
-        // Stream closed without done event
-        sseRef.current = null
-      },
-      (err: Error) => {
-        dispatch({ type: 'ERROR', message: err.message })
-        sseRef.current = null
-      }
-    )
-
-    sseRef.current = sse
+      })
+      dispatch({ type: 'SET_DOC_URL', docUrl: result.docUrl })
+      startPolling(sessionId)
+    } catch (err) {
+      dispatch({ type: 'ERROR', message: err instanceof Error ? err.message : 'Failed to start' })
+    }
   }
 
   async function handlePause() {
@@ -195,22 +195,19 @@ export default function App() {
 
   async function handleStop() {
     await sendControl('stop', state.sessionId)
-    sseRef.current?.abort()
-    sseRef.current = null
+    stopPolling()
     dispatch({ type: 'STOP' })
   }
 
   function handleReset() {
-    sseRef.current?.abort()
-    sseRef.current = null
+    stopPolling()
     dispatch({ type: 'RESET' })
   }
 
   const isWriting = state.status === 'writing'
   const isPaused = state.status === 'paused'
   const isStopped = state.status === 'idle' || state.status === 'done' || state.status === 'error'
-  const isActive = isWriting || isPaused
-  const inputDisabled = isActive
+  const inputDisabled = isWriting || isPaused
 
   return (
     <div className="app">
