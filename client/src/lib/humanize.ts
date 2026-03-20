@@ -90,15 +90,9 @@ export function generateKeystrokes(
       events.push({ type: 'insert', char: '\n', delay: Math.round(triangularRand(40, 80) * speedMultiplier) })
       events.push({ type: 'insert', char: '\n', delay: Math.round(triangularRand(40, 80) * speedMultiplier) })
 
-      // Paragraph thinking pause
-      const thinkMs = Math.round(rand(1000, 4000) * speedMultiplier)
+      // Paragraph pause — min 8s so Google Docs saves a version history entry
+      const thinkMs = Math.max(8000, Math.round(rand(8000, 15000) * speedMultiplier))
       events.push({ type: 'pause', duration: thinkMs })
-
-      // Extra thinking pause at high humanness
-      if (humanness > 60) {
-        const extraThink = Math.round(rand(800, 2000) * speedMultiplier)
-        events.push({ type: 'pause', duration: extraThink })
-      }
     }
 
     // Split paragraph into lines (preserve single newlines)
@@ -199,11 +193,12 @@ export function generateKeystrokes(
           let punctuationPause = 0
 
           if (lastChar === ',' || lastChar === ';') {
-            punctuationPause = Math.round(rand(200, 600) * speedMultiplier)
+            punctuationPause = Math.round(rand(800, 1800) * speedMultiplier)
           } else if (lastChar === '.' || lastChar === '!' || lastChar === '?') {
-            punctuationPause = Math.round(rand(500, 1500) * speedMultiplier)
+            // Min 4s so Google Docs version history gets a checkpoint
+            punctuationPause = Math.max(4000, Math.round(rand(4000, 8000) * speedMultiplier))
           } else if (lastChar === ':') {
-            punctuationPause = Math.round(rand(150, 400) * speedMultiplier)
+            punctuationPause = Math.round(rand(600, 1200) * speedMultiplier)
           }
 
           const spaceDelay = Math.round(triangularRand(20, 80) * speedMultiplier)
@@ -222,9 +217,9 @@ export function generateKeystrokes(
           const lastChar = lastWord[lastWord.length - 1]
           let punctuationPause = 0
           if (lastChar === '.' || lastChar === '!' || lastChar === '?') {
-            punctuationPause = Math.round(rand(400, 1200) * speedMultiplier)
+            punctuationPause = Math.max(4000, Math.round(rand(4000, 8000) * speedMultiplier))
           } else if (lastChar === ',' || lastChar === ';') {
-            punctuationPause = Math.round(rand(150, 400) * speedMultiplier)
+            punctuationPause = Math.round(rand(800, 1800) * speedMultiplier)
           }
           if (punctuationPause > 0) {
             events.push({ type: 'pause', duration: punctuationPause })

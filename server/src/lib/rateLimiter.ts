@@ -39,4 +39,5 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-export const globalRateLimiter = new RateLimiter(250, 250)
+// 60 writes/min = 1/sec — well under Google Docs' 300/min quota, safe for bursts
+export const globalRateLimiter = new RateLimiter(10, 60)

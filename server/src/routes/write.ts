@@ -140,11 +140,11 @@ router.post('/write', async (req: Request, res: Response) => {
     let lastProgressTime = Date.now()
 
     async function flushIfNeeded(force = false): Promise<void> {
+      // Only flush at word/line boundaries with a large enough batch to minimise API calls
       const shouldFlush =
         force ||
-        pendingBuffer.endsWith(' ') ||
-        pendingBuffer.endsWith('\n') ||
-        pendingBuffer.length >= 8
+        (pendingBuffer.endsWith('\n') && pendingBuffer.length >= 20) ||
+        pendingBuffer.length >= 60
 
       if (!shouldFlush || !pendingBuffer) return
 
